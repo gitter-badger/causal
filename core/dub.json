@@ -1,0 +1,9 @@
+{
+    "name": "flow-core",
+    "targetName": "libflow-core",
+    "targetType": "staticLibrary",
+    "targetPath": "../lib",
+    "dependencies": {
+        "msgpack-d": "~>1.0.0-beta.6"
+    }
+}

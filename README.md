@@ -1,2 +1,1 @@
-# flow
-Core of flow runtime
+Please see the runtimes page https://github.com/RalphBariz/flow-rt
