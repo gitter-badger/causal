@@ -1,7 +1,8 @@
 module flow.core.aspect;
-public import flow.core.pack : leaking, pack, unpack;
+public import flow.core.pack: leaking, packNoThrow, unpackNoThrow;
 
 private shared TypeInfo[string] __aspects;
+private shared nothrow Object function(ubyte[])[string] __aspectGetter;
 
 public template isAspect(T) {
     private import flow.core.meta;
@@ -12,11 +13,21 @@ public template isAspect(T) {
         __checkTypeAttributes!T;
 }
 
-public void registerAspect(T)()
+public nothrow Object getAspect(string aspect, ubyte[] pkg) {
+    return __aspectGetter[aspect](pkg);
+}
+
+private nothrow Object getAspect(T)(ubyte[] pkg)
+if(isAspect!T) {
+        return pkg.unpackNoThrow!T;
+}
+
+public nothrow void registerAspect(T)()
 if(isAspect!T) {
     import flow.core.traits: fqn, as;
 
     synchronized __aspects[fqn!T] = typeid(T).as!(shared(TypeInfo));
+    __aspectGetter[fqn!T] = &getAspect!T;
 }
 
 public mixin template aspect() {
@@ -57,6 +68,7 @@ version(unittest) {
 }
 
 unittest {
+    import flow.core.pack: pack, unpack;
     auto a = new A;
     a.x.y = 5;
 

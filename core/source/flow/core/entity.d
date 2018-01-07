@@ -1,71 +1,128 @@
 module flow.core.entity;
 private import flow.core.proc: Processor, Job;
 
-public final class Entity {
+public class Entity {
     private import core.atomic: atomicOp, atomicLoad, atomicStore;
-    private import core.sync.mutex: Mutex;
+    private import core.sync.rwmutex: ReadWriteMutex;
     private import core.thread: Thread, Duration, msecs;
     private import flow.core.meta: identified;
     private import flow.core.pack: leaking, canpack, prepack, postpack;
+    private import std.uuid: UUID;
 
     @leaking public static Duration joinInterval = 5.msecs;
 
-    @leaking private Mutex __lock;
+    @leaking private ReadWriteMutex __lock;
 
     @leaking private shared bool __ticking = false;
     @leaking private shared size_t __count = 0; // counting async operations
 
-    @leaking nothrow @property count() {return atomicLoad(this.__count);}
-    @leaking @canpack nothrow @property empty() {
+    @leaking final nothrow @property count() {return atomicLoad(this.__count);}
+    @leaking @canpack final nothrow @property empty() {
         import flow.core.traits: as;
         return atomicOp!"=="(this.__count, 0.as!size_t);
     }
 
-    @leaking nothrow @property ticking() {
+    @leaking final nothrow @property ticking() {
         return atomicOp!"=="(this.__count, true);
     }
 
-    @leaking @canpack nothrow @property frozen() {
+    @leaking @canpack final nothrow @property frozen() {
         return atomicOp!"=="(this.__count, false);
     }
 
+    @leaking private Object[string] __aspects;
+
     mixin identified;
 
-    Object[string] aspects;
+    ubyte[][string] aspects;
     Throwable error;
 
-    public nothrow this() {
-        this.__lock = new Mutex;
+    public this() {
+        this.__lock = new ReadWriteMutex;
     }
 
-    public nothrow void checkout() {
+    public final nothrow void checkout() {
         import flow.core.traits: as;
         atomicOp!"+="(this.__count, 1.as!size_t);
     }
 
-    public nothrow void checkin() {
+    public final nothrow void checkin() {
         import flow.core.traits: as;
         atomicOp!"-="(this.__count, 1.as!size_t);
     }
 
-    public nothrow void invoke(Processor proc, void delegate() f, long time = long.init) {
-        this.invoke(proc, f, (Throwable thr){}, time);
+    /* invokes an instructed tick into given processor
+    Arguments:
+    *   processor
+    *   tick to process
+        *   this overload takes the actual tick
+        *   types are not directly communicable
+    *   at which standard time should the tick get executed
+        use it cyclic or it will lock up your processors
+    *   this tick is part of a causal branch or starts a new one
+        to debug what happens, this is the key,
+        it is passed from tick to tick so you could track it
+        and intentionally pass an unused randomUUID for separating causal branches */
+    public nothrow bool invoke(T)(Processor proc, T tick, long stdTime = 0, UUID branch = UUID.init, ubyte[] data = null)
+    if(isTick!T) {
+        import flow.core.tick: getJob;
+
+        tick.entity = this.id;
+        tick.aspects = this.__aspects;
+
+        if(t.allowed) {
+            this.checkout();
+            auto job = tick.getJob;
+            this.invoke(job);
+            return true;
+        } else return false;
     }
 
-    public nothrow void invoke(Processor proc, void delegate() f, void delegate(Throwable) e, long time = long.init) {
-        import std.stdio: writeln;
-        import std.parallelism: taskPool, task;
-        
-        this.checkout();
-        auto job = new Job({
-            f();
-            this.checkin();
-        }, (Throwable thr){
-            scope(exit)
-                this.checkin();
-            e(thr);
-        }, time);
-        proc.invoke(job);
+    /// invokes an instructed tick into given processor
+    public nothrow bool invoke(Processor proc, string tick, long stdTime = 0, UUID branch = UUID.init, ubyte[] data = null) {
+        import flow.core.tick: getJob;
+
+        try {
+            synchronized(this.__lock.reader) {
+                if(this.ticking) {
+                    this.checkout();
+                    auto j = tick.getJob(this.id, this.__aspects, branch, data);
+                    if(j != Job.init) {
+                        this.invoke(job);
+                        return true;
+                    } else return false;
+                } return false;
+            }
+        } catch(Throwable thr) {
+            this.damage(thr);
+            return false;
+        }
+    }
+
+    private nothrow void invoke(ref Job job) {
+        try {
+            synchronized(this.__lock.reader) {
+                if(this.ticking) {
+                    auto exec = job.exec;
+                    auto error = job.error;
+
+                    job.exec = () {
+                        exec();
+                        this.checkin();
+                    };
+
+                    job.error = (Throwable thr) {
+                        error(thr);
+                        this.checkin();
+                    };
+                    
+                    proc.invoke(job);
+                } return false;
+            }
+        } catch(Throwable thr) {
+            this.damage(thr);
+            return false;
+        }
     }
 
     public nothrow void join(Duration interval = Entity.joinInterval) {
@@ -74,25 +131,25 @@ public final class Entity {
             Thread.sleep(interval);
     }
 
-    public nothrow void damage(Throwable thr) {
+    public final nothrow void damage(Throwable thr) {
         this.freeze();
-        this.__damage(thr);
+        this.error = thr;
     }
 
-    private nothrow void __damage(Throwable thr) {
+    private final nothrow void __damage(Throwable thr) {
         this.join();
         atomicStore(this.__ticking, false);
-        this.damage(thr);
+        this.error = thr;
     }
 
     public nothrow bool tick() {
-
         try {
-            synchronized(this.__lock) {
-                if(!this.frozen)
-                    this.join();
-                
-                atomicStore(this.__ticking, true);
+            synchronized(this.__lock.writer) {  
+                if(this.ticking) return true;              
+                else {
+                    this.load();
+                    atomicStore(this.__ticking, true);
+                }
             }
             return true;
         } catch(Throwable thr) {
@@ -101,16 +158,27 @@ public final class Entity {
         }
     }
 
+    private nothrow void load() {
+        foreach(a, pkg; this.aspects)
+            this.__aspects[a] = getAspect(a, pkg);
+    }
+
     public nothrow void freeze() {
         try {
-            synchronized(this.__lock) {
-                if(!this.frozen)
+            synchronized(this.__lock.writer) {
+                if(this.frozen) return true;
+                else {
+                    atomicStore(this.__ticking, false);
                     this.join();
-                
-                atomicStore(this.__ticking, false);
+                    this.unload();
+                }
             }
         } catch(Throwable thr) {
             this.__damage(thr);
         }
+    }
+
+    private nothrow void unload() {
+
     }
 }

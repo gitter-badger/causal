@@ -1,19 +1,18 @@
 module flow.core.tick;
-public import flow.core.pack : leaking, pack, unpack;
-public import flow.core.log : LL;
+public import flow.core.log: LL;
+public import flow.core.pack: leaking, packNoThrow, unpackNoThrow;
+private import flow.core.proc: Job;
+private import std.uuid: UUID;
 
 private shared TypeInfo[string] __ticks;
+private shared nothrow Job function(UUID, Object[string], UUID, ubyte[])[string] __tickGetter;
 
 public template __hasRunFunc(T) {
     private import std.traits : hasMember, ReturnType, Parameters, arity;
     enum __hasRunFunc =
         hasMember!(T, "run") &&
-        is(ReturnType!(T.run) == void) && (
-            arity!(T.run) == 0 || (
-                arity!(T.run) == 1 &&
-                __traits(compiles, (pack!(Parameters!(T.run)[0])))
-            )
-        );
+        is(ReturnType!(T.run) == void) && 
+        arity!(T.run) == 0;
 }
 
 public template __hasErrorFunc(T) {
@@ -27,6 +26,17 @@ public template __hasErrorFunc(T) {
         );
 }
 
+public template __hasAllowFunc(T) {
+    private import std.traits : hasMember, ReturnType, Parameters, arity, hasFunctionAttributes;
+    enum __hasErrorFunc =
+        !hasMember!(T, "allow") || (
+            hasMember!(T, "allow") &&
+            is(ReturnType!(T.allow) == bool) &&
+            arity!(T.run) == 0 &&
+            hasFunctionAttributes!(T.allow, "nothrow")
+        );
+}
+
 public template isTick(T) {
     private import flow.core.meta;
 
@@ -37,20 +47,50 @@ public template isTick(T) {
         __hasRunFunc!T;
 }
 
-public void registerTick(T)()
+private nothrow T getTick(T)(UUID entity, Object[string] aspects, UUID branch, ubyte[] pkg)
 if(isTick!T) {
-    import flow.core.traits: fqn, as;
-    import std.traits;
+    import std.uuid: UUID, randomUUID;
 
-    synchronized __ticks[fqn!T] = typeid(T).as!(shared(TypeInfo));
+    auto t = T(a);
+    t.entity = entity;
+    t.aspects = aspects;
+    
+    // if there was no branch given, start one
+    t.branch = branch != UUID.init ? branch : randomUUID;
+    static if(!is(D==void))
+        t.data = pkg.unpackNoThrow!D;
+    return t.getJob;
 }
 
-public mixin template tick() {
+public nothrow Job getJob(T)(T t)
+if(isTick!T) {
+    return t.allowed ? Job(&t.run, &t.error, t.stdTime) : Job.init;
+}
+
+public nothrow Job getJob(string tick, UUID entity, Object[string] aspects, UUID branch, ubyte[] pkg) {
+    return __tickGetter[tick](entity, branch, aspects, pkg);
+}
+
+public nothrow void registerTick(T, D)()
+if(isTick!T) {
+    import flow.core.traits: fqn, as;
+    import std.uuid : UUID;
+
+    synchronized {
+        __ticks[fqn!T] = typeid(T).as!(shared(TypeInfo));
+        __tickGetter[fqn!T] = &getTick!T;
+    }
+}
+
+public mixin template tick(D=void)
+if(is(D==void) || __traits(compiles, pack!D)) {
+    private import flow.core.aspect : isAspect;
     private import flow.core.log : Log;
     private import flow.core.meta : typed;
     private import flow.core.pack : packable;
     private import flow.core.traits : fqn;
     private import std.traits : Unqual, hasMember;
+    private import std.uuid : UUID;
 
     alias T = typeof(this);
 
@@ -60,17 +100,15 @@ public mixin template tick() {
         }
     }
 
+    static if(!hasMember!(T, "allow")) {
+        nothrow bool allow() {
+            return true;
+        }
+    }
+
     static assert(is(Unqual!T == struct), "tick ["~fqn!T~"] has to be a struct");
     static assert(__hasRunFunc!T, "tick ["~fqn!T~"] has no qualified run function
-        a tick's run handler can have 0 or 1 packable parameters and needs to return void
-        examples:
-            void run() {}
-            void run(long x) {}
-            void run(X x) // where X is packable
-        negative examples:
-            int run() {}
-            void run(X x, Y y) {}
-            void run(Mutex m) {}
+        a tick's run handler has to be parameterless
     ");
     static assert(__hasErrorFunc!T, "tick ["~fqn!T~"] has no qualified error handler
         required:
@@ -84,6 +122,19 @@ public mixin template tick() {
     mixin typed;
     mixin packable;
 
+    UUID entity;
+    Object[string] aspects;
+    nothrow @property T aspect(T)() if(isAspect!T) {
+        if(fqn!T in this.aspects) {
+            return this.aspects[fqn!T].as!T;
+        } else return null;
+    }
+
+    UUID branch;
+    static if(!is(D==void))
+        D data;
+    long stdTime;
+
     private nothrow void log(LL level, Throwable thr = null) {
         Log.msg(LL.Warning, "tick(\""~fqn!T~"\")", thr);
     }
@@ -93,7 +144,7 @@ public mixin template tick() {
     }
 
     shared static this() {
-        registerTick!T;
+        registerTick!(T, D);
     }
 }
 
@@ -107,9 +158,7 @@ version(unittest) {
 
         long x;
 
-        void run(long x) {
-            this.x = x;
-        }
+        void run() {}
     }
 
     struct B {
@@ -125,6 +174,7 @@ version(unittest) {
 }
 
 unittest {
+    import flow.core.pack: pack, unpack;
     A a;
     a.x = 5;
     

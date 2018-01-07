@@ -28,9 +28,9 @@ struct Job {
     private Job* prev;
     private Job* next;
 
-    private void delegate() exec;
-    private void delegate(Throwable thr) error;
-    private long time;
+    void delegate() exec;
+    nothrow void delegate(Throwable thr) error;
+    long time;
 
     nothrow this(void delegate() exec, void delegate(Throwable thr) error, long time = long.init) {
         this.exec = exec;
