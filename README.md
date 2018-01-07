@@ -1,1 +1,1 @@
-Please see the runtimes page https://github.com/RalphBariz/flow.git
+Please see flow's page https://github.com/RalphBariz/flow.git
