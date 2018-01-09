@@ -1,13 +1,14 @@
-module flow.core.proc;
+module causal.proc;
 
 private import core.thread;
-private import flow.core.atomic;
-private import flow.core.traits;
+private import causal.atomic;
+private import causal.data;
+private import causal.traits;
 private static import std.parallelism;
 
 alias totalCPUs = std.parallelism.totalCPUs;
 
-private enum JobState : ubyte
+private enum TickState : ubyte
 {
     NotStarted,
     InProgress,
@@ -24,21 +25,91 @@ private final class Pipe : Thread
     Processor proc;
 }
 
-struct Job {
-    private Job* prev;
-    private Job* next;
+static class Ticks {
+    private import core.sync.rwmutex: ReadWriteMutex;
+    private import std.uuid: UUID;
 
-    void delegate() exec;
-    nothrow void delegate(Throwable thr) error;
-    long time;
+    private __gshared ReadWriteMutex lock;
+    private __gshared static Tick delegate(Data d, UUID b, ulong p, long t) [string] getter;
 
-    nothrow this(void delegate() exec, void delegate(Throwable thr) error, long time = long.init) {
-        this.exec = exec;
-        this.error = error;
-        this.time = time;
+    shared static this() {
+        lock = new ReadWriteMutex;
     }
+
+    static void put(string name, void function(Data d) run, void function(Data d, Throwable thr) nothrow error) {
+        synchronized(this.lock.writer)
+            getter[name] = (Data d, UUID b, ulong p, long t) {
+                return Tick(d, run, error, b, p, t);
+            };
+    }
+
+    static Tick get(string name, Data d) {
+        synchronized(this.lock.reader)
+            return getter[name](d, UUID.init, ulong.max, long.init);
+    }
+
+    static Tick get(string name, Data d, UUID b = UUID.init, ulong p = ulong.max, long t = long.init) {
+        synchronized(this.lock.reader)
+            return getter[name](d, b, p, t);
+    }
+}
+
+public mixin template tick(string name, void function(Data d) run, void function(Data d, Throwable thr) nothrow error) {
+    private import causal.proc;
+
+    shared static this() {
+        Ticks.put(name, run, error);
+    }
+}
+
+version(unittest) {
+    mixin tick!("foo", (d){}, (d, t) nothrow {});
+    mixin tick!("bar", (d){}, (d, t) nothrow {});
+}
+
+unittest {
+    assert(Ticks.get("foo", null) != Tick.init, "tick could not be created");
+    assert(Ticks.get("bar", null) != Tick.init, "tick could not be created");
+}
+
+struct Tick {
+    private import std.uuid: UUID;
+
+    private Tick* prev;
+    private Tick* next;
     
-    private ubyte taskStatus = JobState.NotStarted;
+    private ubyte tickStatus = TickState.NotStarted;
+
+    Data data;
+    void function(Data d) run;
+    void function(Data d, Throwable thr) nothrow error;
+    UUID branch;
+    long priority;
+    long stdTime;
+
+    this(
+        // data whichs modification this tick describes
+        Data data,
+        // data modifying function
+        void function(Data d) run,
+        // error handler
+        void function(Data d, Throwable thr) nothrow error,
+        // if causal branch is not given start a new one
+        UUID branch,
+        // priority of this tick
+        ulong priotity,
+        // standard time this tick is scheduled for
+        long stdTime
+    ) {
+        import std.uuid;
+
+        this.data = data;
+        this.run = run;
+        this.error = error;
+        this.branch = branch != UUID.init ? branch : randomUUID;
+        this.priority = priority;
+        this.stdTime = stdTime;
+    }
 }
 
 final class Processor {
@@ -47,8 +118,8 @@ final class Processor {
 
     private Pipe[] pipes;
 
-    private Job* head;
-    private Job* tail;
+    private Tick* head;
+    private Tick* tail;
     private PoolState status = PoolState.running;
     private long nextTime;
     private Condition workerCondition;
@@ -104,7 +175,7 @@ final class Processor {
         }
     }
 
-    public nothrow bool invoke(Job* j) {
+    public nothrow bool invoke(Tick* j) {
         if(atomicReadUbyte(this.status) == PoolState.running) {
             try {this.put(j);}
             catch(Throwable thr) {return false;}
@@ -114,7 +185,7 @@ final class Processor {
 
     public void stop() {
         {
-            import flow.core.atomic: atomicCasUbyte;
+            import causal.atomic: atomicCasUbyte;
 
             this.queueLock();
             scope(exit) this.queueUnlock();
@@ -151,17 +222,17 @@ final class Processor {
     until they terminate.  It's also entered by non-worker threads when
     finish() is called with the blocking variable set to true. */
     private void executeWorkLoop() {    
-        import flow.core.atomic: atomicReadUbyte, atomicSetUbyte;
+        import causal.atomic: atomicReadUbyte, atomicSetUbyte;
 
         while (atomicReadUbyte(this.status) != PoolState.stopNow) {
-            Job* task = pop();
+            Tick* task = pop();
             if (task is null) {
                 if (atomicReadUbyte(this.status) == PoolState.finishing) {
                     atomicSetUbyte(this.status, PoolState.stopNow);
                     return;
                 }
             } else {
-                this.doJob(task);
+                this.doTick(task);
             }
         }
     }
@@ -210,7 +281,7 @@ final class Processor {
     }
 
     /// Pop a task off the queue.
-    private Job* pop()
+    private Tick* pop()
     {
         this.queueLock();
         scope(exit) this.queueUnlock();
@@ -223,7 +294,7 @@ final class Processor {
         return ret;
     }
 
-    private Job* popNoSync()
+    private Tick* popNoSync()
     out(ret) {
         /* If task.prev and task.next aren't null, then another thread
          * can try to delete this task from the pool after it's
@@ -240,12 +311,12 @@ final class Processor {
         auto stdTime = Clock.currStdTime;
 
         this.nextTime = long.max;
-        Job* ret = this.head;
+        Tick* ret = this.head;
         if(ret !is null) {
             // skips ticks not to execute yet
-            while(ret !is null && ret.time > stdTime) {
-                if(ret.time < this.nextTime)
-                    this.nextTime = ret.time;
+            while(ret !is null && ret.stdTime > stdTime) {
+                if(ret.stdTime < this.nextTime)
+                    this.nextTime = ret.stdTime;
                 ret = ret.next;
             }
         }
@@ -255,7 +326,7 @@ final class Processor {
             this.head = ret.next;
             ret.prev = null;
             ret.next = null;
-            ret.taskStatus = JobState.InProgress;
+            ret.tickStatus = TickState.InProgress;
         }
 
         if (this.head !is null)
@@ -266,12 +337,12 @@ final class Processor {
         return ret;
     }
 
-    private void doJob(Job* job) {
-        import flow.core.atomic: atomicSetUbyte;
+    private void doTick(Tick* tick) {
+        import causal.atomic: atomicSetUbyte;
 
-        assert(job.taskStatus == JobState.InProgress);
-        assert(job.next is null);
-        assert(job.prev is null);
+        assert(tick.tickStatus == TickState.InProgress);
+        assert(tick.next is null);
+        assert(tick.prev is null);
 
         scope(exit) {
             this.waiterLock();
@@ -280,23 +351,23 @@ final class Processor {
         }
 
         try {
-            job.exec();
+            tick.run(tick.data);
         } catch (Throwable thr) {
-            job.error(thr);
+            tick.error(tick.data, thr);
         }
 
-        atomicSetUbyte(job.taskStatus, JobState.Done);
+        atomicSetUbyte(tick.tickStatus, TickState.Done);
     }
     
     /// Push a task onto the queue.
-    private void put(Job* task)
+    private void put(Tick* task)
     {
         queueLock();
         scope(exit) queueUnlock();
         putNoSync(task);
     }
 
-    private void putNoSync(Job* task)
+    private void putNoSync(Tick* task)
     in {
         assert(task);
     } out {

@@ -1,4 +1,4 @@
-module flow.core.log;
+module causal.log;
 
 enum LL {
     Message = 0,
@@ -22,7 +22,7 @@ final static class Log {
     public shared static wrap = 120;
 
     private static nothrow string get(Throwable thr) {
-        import flow.core.traits: as;
+        import causal.traits: as;
         import std.conv: to;
         
         string str;
@@ -47,7 +47,7 @@ final static class Log {
 
     /// log a message
     public static nothrow void msg(LL level, string msg, Throwable thr = null) {
-        import flow.core.traits: as;
+        import causal.traits: as;
         import std.traits: isArray;
 
         if(level <= Log.level)

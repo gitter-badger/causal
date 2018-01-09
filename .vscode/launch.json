@@ -1,0 +1,24 @@
+{
+    "version": "0.2.0",
+
+    "configurations": [
+        {
+            "name": "test/core (Posix)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/lib/flow-core-test-library",
+            "args": [ ],
+            "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "test/core (Windows)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}\\lib\\flow-core-test-library.exe",
+            "args": [ ],
+            "environment": [ ],
+            "cwd": "${workspaceRoot}"
+}
+    ]
+}

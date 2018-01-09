@@ -1,8 +1,8 @@
 {
-    "name": "flow-core",
-    "targetName": "libflow-core",
+    "name": "causal",
+    "targetName": "libcausal",
     "targetType": "staticLibrary",
-    "targetPath": "../lib",
+    "targetPath": "lib",
     "dependencies": {
         "msgpack-d": "~>1.0.0-beta.6"
     }
