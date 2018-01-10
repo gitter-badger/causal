@@ -27,16 +27,20 @@ final class Operator {
     @unpacked void onUnpacked() {
         synchronized(this.__lock.writer) {
             if(this.__proc is null)
-                this.__proc = new Processor(this.pipes);
+                this.__proc = new Processor(this.pipes);            
         }
     }
 
     void assign(TickCtx c) {
+        import causal.traits: as;
+
         synchronized(this.__lock.reader) {
             if(c.branch.data.loaded) {
                 auto tick = Ticks.get(c, &c.branch.data.notify);
                 c.branch.data.checkout();
                 this.__proc.invoke(tick);
+            } else {
+                c.branch.data.ticks ~= c.as!(shared(TickCtx));
             }
         }
     }

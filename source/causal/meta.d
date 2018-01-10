@@ -95,7 +95,7 @@ package mixin template identified() {
     alias S = typeof(super);
 
     static if(!__hasIdField!S)
-        package UUID  __id;
+        UUID  __id;
     else
         static assert(__isIdType!S && __hasIdAttributes!S, "super type ["~fqn!S~"] already has an incompatible field >__id<");
 

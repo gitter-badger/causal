@@ -29,10 +29,14 @@ package final pure class Data {
     @leaking private static __gshared ReadWriteMutex __lock;
     @leaking private static shared bool[UUID] __loaded;
     @leaking private static shared Object[][string][UUID] __aspects;
+    
+    TickCtx[] ticks;
 
     ubyte[][string] aspects;
-    TickCtx[] ticks;
     string damage;
+
+    Data operator;
+    ulong idx;
 
     shared static this() {
         __lock = new ReadWriteMutex;
@@ -56,17 +60,19 @@ package final pure class Data {
         this.__id = id == UUID.init ? randomUUID : id;
     }
 
-    nothrow void put(T)(T[] a) {
+    void put(T)(T[] a) {
         synchronized(this.__lock.writer)
             this.__aspects[this.__id][fqn!T] = a;
     }
 
-    nothrow T[] get(T)() {
+    T[] get(T)() {
+        import causal.traits: fqn, as;
+
         synchronized(this.__lock.reader)
-            return this.__aspects[this.__id][fqn!T];
+            return this.__aspects[this.__id][fqn!T].as!(T[]);
     }
 
-    @packing void onPacking() {
+    @packing void unload() {
         import std.ascii : newline;
         import std.conv: to;
 
@@ -75,8 +81,17 @@ package final pure class Data {
                 if(this.__loaded[this.__id]) {
                     this.__loaded[this.__id] = false;
                     this.join();
+
+                    // add all pending ticks to operators ticks if there is any
+                    if(this.operator !is null && this.operator.__id != this.__id) {
+                        this.ticks = null;
+                        foreach(t; this.ticks)
+                            this.operator.ticks ~= t;
+                    }
                     
                     // TODO pack aspects
+
+                    this.__aspects[this.__id] = null;
                 }
             }
         } catch(Throwable thr) {
@@ -86,7 +101,7 @@ package final pure class Data {
         }
     }
 
-    @unpacked void onUnpacked() {
+    @unpacked void load() {
         import causal.traits: fqn;
         import std.uuid: randomUUID;
 
@@ -98,6 +113,12 @@ package final pure class Data {
                 this.__loaded[this.__id] = true;
 
                 // TODO unpack aspects
+
+                /* this might be an operator, whoever unpacked it has no to make it ticking
+                by doing:
+                    foreach(t; data.ticks)
+                        data.get!Operator[0].assign(t);
+                */
             }
         }
     }
