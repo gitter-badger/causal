@@ -1,10 +1,28 @@
 module causal.data;
 
+public struct Branch {
+    private import causal.data: Data;
+    private import std.uuid: UUID;
+
+    UUID id;
+
+    // data whichs modification this tick describes
+    Data data;
+}
+
+public struct TickCtx {
+    // ticks name
+    string tick;
+    // causal strain tick act in
+    Branch branch;
+    // standard time this tick is scheduled for
+    long stdTime = long.init;
+}
+
 package final pure class Data {
     private import causal.aspect: isAspect;
     private import causal.meta: identified, counting;
     private import causal.pack: leaking, packing, unpacked;
-    private import causal.tick: TickCtx;
     private import core.sync.rwmutex: ReadWriteMutex;
     private import std.uuid: UUID;
     
@@ -69,7 +87,6 @@ package final pure class Data {
     }
 
     @unpacked void onUnpacked() {
-        import causal.op: Operator;
         import causal.traits: fqn;
         import std.uuid: randomUUID;
 
@@ -81,16 +98,6 @@ package final pure class Data {
                 this.__loaded[this.__id] = true;
 
                 // TODO unpack aspects
-
-                // if it has exactly one operator aspect it is self driven
-                // self sustained data/tick/opaspect sets are the kickstarters
-                if(fqn!Operator in this.__aspects[this.__id] &&
-                    this.__aspects[this.__id][fqn!Operator].length == 1
-                ) { // then it can make itself ticking
-                    auto op = this.__aspects[this.__id][fqn!Operator][0];
-                    foreach(t; this.ticks)
-                        op.as!Operator.assign(t);
-                }
             }
         }
     }

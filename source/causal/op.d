@@ -6,6 +6,7 @@ private import causal.pack;
 private import causal.proc;
 
 final class Operator {
+    private import causal.data: TickCtx;
     private import core.sync.rwmutex: ReadWriteMutex;
 
     mixin aspect;
@@ -32,10 +33,9 @@ final class Operator {
 
     void assign(TickCtx c) {
         synchronized(this.__lock.reader) {
-            auto tick = Ticks.get(c);
             if(c.branch.data.loaded) {
+                auto tick = Ticks.get(c, &c.branch.data.notify);
                 c.branch.data.checkout();
-                tick.notify = &c.branch.data.notify;
                 this.__proc.invoke(tick);
             }
         }

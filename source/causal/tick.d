@@ -1,14 +1,5 @@
 module causal.tick;
-private import causal.branch: Branch;
-
-public struct TickCtx {
-    // ticks name
-    string tick;
-    // causal strain tick act in
-    Branch branch;
-    // standard time this tick is scheduled for
-    long stdTime = long.init;
-}
+private import causal.data;
 
 package static class Ticks {
     private import core.sync.rwmutex: ReadWriteMutex;
@@ -29,9 +20,12 @@ package static class Ticks {
         }
     }
 
-    static Tick* get(TickCtx c) {
-        synchronized(this.lock.reader)
-            return getter[c.tick](c);
+    static Tick* get(TickCtx c, void delegate(TickCtx) nothrow n) {
+        synchronized(this.lock.reader) {
+            Tick* t = getter[c.tick](c);
+            t.notify = n;
+            return t;
+        }
     }
 }
 
@@ -88,6 +82,7 @@ version(unittest) {
 }
 
 unittest {
-    assert(Ticks.get(TickCtx("foo")) !is null, "tick could not be created");
-    assert(Ticks.get(TickCtx("bar")) !is null, "tick could not be created");
+    nothrow void notify(TickCtx tc) {}
+    assert(Ticks.get(TickCtx("foo"), &notify) !is null, "tick could not be created");
+    assert(Ticks.get(TickCtx("bar"), &notify) !is null, "tick could not be created");
 }
