@@ -33,9 +33,6 @@ final static class Log {
             catch(Throwable thr) {}
             str ~= newline~thr.file~"("~line~"):\t"~thr.msg;
 
-            if(thr.msg != string.init)
-                str ~= thr.msg~newline;
-
             string stackTrace = "n/a";
             try{stackTrace = thr.info.to!string;}
             catch(Throwable thr) {}

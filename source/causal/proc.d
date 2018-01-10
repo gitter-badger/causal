@@ -2,20 +2,13 @@ module causal.proc;
 
 private import core.thread;
 private import causal.atomic;
-private import causal.data;
+private import causal.tick;
 private import causal.traits;
 private static import std.parallelism;
 
 alias totalCPUs = std.parallelism.totalCPUs;
 
-private enum TickState : ubyte
-{
-    NotStarted,
-    InProgress,
-    Done
-}
-
-private final class Pipe : Thread
+package final class Pipe : Thread
 {
     nothrow this(void delegate() dg)
     {
@@ -25,94 +18,7 @@ private final class Pipe : Thread
     Processor proc;
 }
 
-static class Ticks {
-    private import core.sync.rwmutex: ReadWriteMutex;
-    private import std.uuid: UUID;
-
-    private __gshared ReadWriteMutex lock;
-    private __gshared static Tick delegate(Data d, UUID b, ulong p, long t) [string] getter;
-
-    shared static this() {
-        lock = new ReadWriteMutex;
-    }
-
-    static void put(string name, void function(Data d) run, void function(Data d, Throwable thr) nothrow error) {
-        synchronized(this.lock.writer)
-            getter[name] = (Data d, UUID b, ulong p, long t) {
-                return Tick(d, run, error, b, p, t);
-            };
-    }
-
-    static Tick get(string name, Data d) {
-        synchronized(this.lock.reader)
-            return getter[name](d, UUID.init, ulong.max, long.init);
-    }
-
-    static Tick get(string name, Data d, UUID b = UUID.init, ulong p = ulong.max, long t = long.init) {
-        synchronized(this.lock.reader)
-            return getter[name](d, b, p, t);
-    }
-}
-
-public mixin template tick(string name, void function(Data d) run, void function(Data d, Throwable thr) nothrow error) {
-    private import causal.proc;
-
-    shared static this() {
-        Ticks.put(name, run, error);
-    }
-}
-
-version(unittest) {
-    mixin tick!("foo", (d){}, (d, t) nothrow {});
-    mixin tick!("bar", (d){}, (d, t) nothrow {});
-}
-
-unittest {
-    assert(Ticks.get("foo", null) != Tick.init, "tick could not be created");
-    assert(Ticks.get("bar", null) != Tick.init, "tick could not be created");
-}
-
-struct Tick {
-    private import std.uuid: UUID;
-
-    private Tick* prev;
-    private Tick* next;
-    
-    private ubyte tickStatus = TickState.NotStarted;
-
-    Data data;
-    void function(Data d) run;
-    void function(Data d, Throwable thr) nothrow error;
-    UUID branch;
-    long priority;
-    long stdTime;
-
-    this(
-        // data whichs modification this tick describes
-        Data data,
-        // data modifying function
-        void function(Data d) run,
-        // error handler
-        void function(Data d, Throwable thr) nothrow error,
-        // if causal branch is not given start a new one
-        UUID branch,
-        // priority of this tick
-        ulong priotity,
-        // standard time this tick is scheduled for
-        long stdTime
-    ) {
-        import std.uuid;
-
-        this.data = data;
-        this.run = run;
-        this.error = error;
-        this.branch = branch != UUID.init ? branch : randomUUID;
-        this.priority = priority;
-        this.stdTime = stdTime;
-    }
-}
-
-final class Processor {
+package final class Processor {
     private import core.sync.condition: Condition;
     private import core.sync.mutex: Mutex;
 
@@ -145,7 +51,7 @@ final class Processor {
         stopNow
     }
 
-    public this(size_t nWorkers = 1) {
+    package this(size_t nPipes = 1) {
         synchronized(typeid(Processor))
         {
             instanceStartIndex = nextInstanceIndex;
@@ -154,7 +60,7 @@ final class Processor {
             // and will increment it.  The second worker to be initialized will
             // have this index plus 1.
             nextThreadIndex = instanceStartIndex;
-            nextInstanceIndex += nWorkers;
+            nextInstanceIndex += nPipes;
         }
 
         this.queueMutex = new Mutex(this);
@@ -162,12 +68,12 @@ final class Processor {
         workerCondition = new Condition(queueMutex);
         waiterCondition = new Condition(waiterMutex);
         
-        this.pipes = new Pipe[nWorkers];
+        this.pipes = new Pipe[nPipes];
 
         this.start();
     }
 
-    private void start() {
+    public void start() {
         foreach (ref poolThread; this.pipes) {
             poolThread = new Pipe(&startWorkLoop);
             poolThread.proc = this;
@@ -195,12 +101,13 @@ final class Processor {
         // Use this thread as a worker until everything is finished.
         this.executeWorkLoop();
 
-        this.join();
-    }
-
-    public void join() {
         foreach (t; this.pipes)
             t.join();
+
+        foreach (ref poolThread; this.pipes) {
+            poolThread.destroy;
+            poolThread = null;
+        }
     }
 
     /** This function performs initialization for each thread that affects
@@ -300,8 +207,7 @@ final class Processor {
          * can try to delete this task from the pool after it's
          * alreadly been deleted/popped.
          */
-        if (ret !is null)
-        {
+        if (ret !is null) {
             assert(ret.next is null);
             assert(ret.prev is null);
         }
@@ -314,23 +220,21 @@ final class Processor {
         Tick* ret = this.head;
         if(ret !is null) {
             // skips ticks not to execute yet
-            while(ret !is null && ret.stdTime > stdTime) {
-                if(ret.stdTime < this.nextTime)
-                    this.nextTime = ret.stdTime;
+            while(ret !is null && ret.ctx.stdTime > stdTime) {
+                if(ret.ctx.stdTime < this.nextTime)
+                    this.nextTime = ret.ctx.stdTime;
                 ret = ret.next;
             }
         }
 
-        if (ret !is null)
-        {
+        if (ret !is null) {
             this.head = ret.next;
             ret.prev = null;
             ret.next = null;
-            ret.tickStatus = TickState.InProgress;
+            ret.state = TickState.InProgress;
         }
 
-        if (this.head !is null)
-        {
+        if (this.head !is null) {
             this.head.prev = null;
         }
 
@@ -340,7 +244,7 @@ final class Processor {
     private void doTick(Tick* tick) {
         import causal.atomic: atomicSetUbyte;
 
-        assert(tick.tickStatus == TickState.InProgress);
+        assert(tick.state == TickState.InProgress);
         assert(tick.next is null);
         assert(tick.prev is null);
 
@@ -351,12 +255,14 @@ final class Processor {
         }
 
         try {
-            tick.run(tick.data);
+            tick.run(tick.ctx.strain);
         } catch (Throwable thr) {
-            tick.error(tick.data, thr);
+            tick.error(tick.ctx.strain, thr);
         }
 
-        atomicSetUbyte(tick.tickStatus, TickState.Done);
+        tick.notify(tick.ctx);
+
+        atomicSetUbyte(tick.state, TickState.Done);
     }
     
     /// Push a task onto the queue.
@@ -369,15 +275,14 @@ final class Processor {
 
     private void putNoSync(Tick* task)
     in {
-        assert(task);
+        assert(task !is null && *task != Tick.init);
     } out {
         import std.conv: text;
 
         assert(tail.prev !is tail);
         assert(tail.next is null, text(tail.prev, '\t', tail.next));
-        if (tail.prev !is null) {
+        if (tail.prev !is null)
             assert(tail.prev.next is tail, text(tail.prev, '\t', tail.next));
-        }
     } body {
         // Not using enforce() to save on function call overhead since this
         // is a performance critical function.
@@ -389,7 +294,7 @@ final class Processor {
         }
 
         task.next = null;
-        if (head is null) {   //Queue is empty.
+        if (head !is null) {   //Queue is empty.
             head = task;
             tail = task;
             tail.prev = null;

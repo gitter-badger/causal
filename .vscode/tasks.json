@@ -7,51 +7,94 @@
             "label": "causal debug",
             "type": "shell",
             "command": "dub",
-            "args": [ "build", "-debug" ],
+            "args": [
+                "build",
+                "-debug"
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": [{
-                "owner": "d",
-                "fileLocation": [
-                    "relative",
-                    "${workspaceRoot}"
-                ],
-                "pattern": {
-                    "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(Warning|Error):\\s+(.*)$",
-                    "file": 1,
-                    "line": 2,
-                    "column": 3,
-                    "severity": 4,
-                    "message": 5
+            "linux": {
+                "args": [/*"--compiler=ldc"*/]
+            },
+            "problemMatcher": [
+                {
+                    "owner": "d",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceRoot}"
+                    ],
+                    "pattern": {
+                        "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(Warning|Error):\\s+(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3,
+                        "severity": 4,
+                        "message": 5
+                    }
                 }
-            }]
+            ]
         },
         {
             "label": "causal test",
             "type": "shell",
             "command": "dub",
-            "args": [ "test" ],
+            "args": [
+                "test"/*,
+                "-v",
+                "--force",*/
+            ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": [{
-                "owner": "d",
-                "fileLocation": [
-                    "relative",
-                    "${workspaceRoot}"
-                ],
-                "pattern": {
-                    "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(Warning|Error):\\s+(.*)$",
-                    "file": 1,
-                    "line": 2,
-                    "column": 3,
-                    "severity": 4,
-                    "message": 5
+            "linux": {
+                "args": [/*"--compiler=ldc"*/]
+            },
+            "problemMatcher": [
+                {
+                    "owner": "d",
+                    "fileLocation": [
+                        "relative",
+                        "${workspaceRoot}"
+                    ],
+                    "pattern": {
+                        "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(Warning|Error):\\s+(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "column": 3,
+                        "severity": 4,
+                        "message": 5
+                    }
                 }
-            }]
+            ]
+        },
+        {
+            "label": "init local msgpack-d",
+            "type": "shell",
+            "command": "dub",
+            "args": [
+                "add-local",
+                "${workspaceRoot}/msgpack-d"
+            ],
+            "group": {
+                "kind": "build"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "deinit local msgpack-d",
+            "type": "shell",
+            "command": "dub",
+            "args": [
+                "remove-local",
+                "${workspaceRoot}/msgpack-d"
+            ],
+            "group": {
+                "kind": "build"
+            },
+            "problemMatcher": []
         }
     ]
 }

@@ -3,22 +3,22 @@
 
     "configurations": [
         {
-            "name": "test/core (Posix)",
+            "name": "test causal (Posix)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceRoot}/lib/flow-core-test-library",
+            "program": "${workspaceRoot}/lib/causal-test-library",
             "args": [ ],
             "environment": [{"name": "LD_LIBRARY_PATH", "value": "${workspaceRoot}/lib"}],
             "cwd": "${workspaceRoot}"
         },
         {
-            "name": "test/core (Windows)",
+            "name": "test causal (Windows)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceRoot}\\lib\\flow-core-test-library.exe",
+            "program": "${workspaceRoot}\\lib\\causal-test-library.exe",
             "args": [ ],
             "environment": [ ],
             "cwd": "${workspaceRoot}"
-}
+        }
     ]
 }

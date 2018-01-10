@@ -44,16 +44,19 @@ if(is(M==void) || is(M:Condition) || is(M:ReadWriteMutex) || is(M:Mutex) || is(M
     static assert(is(typeof(super) == Object), "aspect "~fqn!T~" has to derrive from class Object");
 
     shared static this() {
-        registerAspect!(typeof(this));
+        import causal.aspect : registerAspect;
+        registerAspect!T;
     }
 
     static if(!is(M==void))
         @leaking M lock;
 
-    this() {
-        static if(!is(M==void))
+    mixin typed;
+
+    static if(!is(M==void))
+        this() {
             this.lock = new M;
-    }
+        }
 }
 
 version(unittest) {
@@ -77,45 +80,4 @@ unittest {
     a.x.y = 5;
 
     assert(a.pack.unpack!A.x.y == 5, "pack/unpack of aspect failed");
-}
-
-public template isVersatile(T) {
-    private import causal.pack: leaking;
-    private import std.traits;
-
-    // there could be more but it only affects a wrong template
-    enum isVersatile =
-        isFinalClass!T &&
-        hasMember!(T, "aspects") &&
-        !hasUDA!(T.aspects, leaking);
-}
-
-// note there could be a versatile with permissions get implemented
-
-public mixin template versatile() {
-    private import core.sync.rwmutex: ReadWriteMutex;
-    private import causal.pack;
-
-    Object[][string] aspects;
-
-    @leaking ReadWriteMutex aspectsLock;
-
-    @leaking nothrow @property size_t length(T)() {
-        synchronized(this.aspectsLock.reader)
-            return this.aspects[fqn!T].length;
-    }
-
-    this() {
-        this.aspectsLock = new ReadWriteMutex;
-    }
-
-    nothrow void put(T)(T[] a) {
-        synchronized(this.aspectsLock.writer)
-            this.aspects[fqn!T] = a;
-    }
-
-    nothrow T[] get(T)() {
-        synchronized(this.aspectsLock.writer)
-            return this.aspects[fqn!T];
-    }
 }

@@ -84,22 +84,12 @@ private void execFailFuncs(UDA, T)(T arg, Throwable thr) if((is(UDA == packfail)
 }
 
 public ubyte[] pack(T)(ref T arg) {
-    import causal.meta: hasId;
     import std.range: empty;
     import std.traits: Unqual;
 
     if(checkCanPack(arg)) {
         execFuncs!packing(arg);
-        auto r = msgpack.pack(arg);
-        if(!r.empty) {
-            /* packing keeps identity, so if an
-            identified piec of data is packed destroy original */
-            static if(is(Unqual!T == class)) {
-                arg.destroy;
-                arg = null;
-            }
-        }
-        return r;
+        return msgpack.pack(arg);
     } return null;
 }
 
@@ -135,11 +125,7 @@ unittest {
 }
 
 unittest {
-    auto dtor = false;
     class A {
-        private import causal.meta: identified;
-        mixin identified;
-
         int x;
         int y;
 
@@ -150,18 +136,10 @@ unittest {
         @unpacked nothrow void post() {
             y = 8;
         }
-
-        ~this() {
-            // only original should do this
-            if(this.y == int.init)
-                dtor = true;
-        }
     }
     auto t = new A;
     auto tb = t;
     auto tn = t.pack.unpack!A;
-    assert(t is null, "didn't keep identity");
-    assert(dtor, "didn't keep identity");
     assert(tn.x == 5, "@packing failed");
     assert(tn.y == 8, "@unpacked failed");
 }

@@ -1,9 +1,10 @@
 {
     "name": "causal",
+	"license": "AGPL-3.0",
     "targetName": "libcausal",
     "targetType": "staticLibrary",
     "targetPath": "lib",
     "dependencies": {
-        "msgpack-d": "~>1.0.0-beta.6"
+        "msgpack-d": ">=1.0.0-beta.6"
     }
 }

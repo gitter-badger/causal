@@ -8,7 +8,7 @@ module causal.atomic;
        without wrapping it.  If I didn't wrap it, casts would be required
        basically everywhere.
 */
-public void atomicSetUbyte(T)(ref T stuff, T newVal)
+public nothrow void atomicSetUbyte(T)(ref T stuff, T newVal)
 if (__traits(isIntegral, T) && is(T : ubyte)) {
     import core.atomic : atomicStore;
 
@@ -17,7 +17,7 @@ if (__traits(isIntegral, T) && is(T : ubyte)) {
 
 /** This gets rid of the need for a lot of annoying casts in other parts of the
 code, when enums are involved. */
-public ubyte atomicReadUbyte(T)(ref T val)
+public nothrow ubyte atomicReadUbyte(T)(ref T val)
 if (__traits(isIntegral, T) && is(T : ubyte)) {
     import core.atomic : atomicLoad;
 
@@ -26,7 +26,7 @@ if (__traits(isIntegral, T) && is(T : ubyte)) {
 
 /** This gets rid of the need for a lot of annoying casts in other parts of the
 code, when enums are involved. */
-public bool atomicCasUbyte(T)(ref T stuff, T testVal, T newVal)
+public nothrow bool atomicCasUbyte(T)(ref T stuff, T testVal, T newVal)
 if (__traits(isIntegral, T) && is(T : ubyte)) {
     import core.atomic : cas;
 
