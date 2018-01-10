@@ -1,23 +1,13 @@
 module causal.tick;
-private import causal.data;
+private import causal.branch: Branch;
 
 public struct TickCtx {
     // ticks name
     string tick;
     // causal strain tick act in
-    Strain strain;
+    Branch branch;
     // standard time this tick is scheduled for
     long stdTime = long.init;
-}
-
-public struct Strain {
-    private import std.uuid: UUID;
-
-    // the branch this strain belongs to
-    UUID branch;
-
-    // data whichs modification this tick describes
-    Data data;
 }
 
 package static class Ticks {
@@ -31,7 +21,7 @@ package static class Ticks {
         lock = new ReadWriteMutex;
     }
 
-    static void put(string name, void function(Strain) run, void function(Strain, Throwable) nothrow error) {
+    static void put(string name, void function(Branch) run, void function(Branch, Throwable) nothrow error) {
         synchronized(this.lock.writer) {
             getter[name] = (TickCtx c) {
                 return new Tick(run, error, c);
@@ -45,7 +35,7 @@ package static class Ticks {
     }
 }
 
-public mixin template tick(string name, void function(Strain) run, void function(Strain, Throwable) nothrow error) {
+public mixin template tick(string name, void function(Branch) run, void function(Branch, Throwable) nothrow error) {
     private import causal.proc;
 
     shared static this() {
@@ -69,14 +59,14 @@ public struct Tick {
     package TickCtx ctx;
     package shared TickState state;
 
-    package void function(Strain s) run;
-    package void function(Strain s, Throwable thr) nothrow error;
+    package void function(Branch s) run;
+    package void function(Branch s, Throwable thr) nothrow error;
     package void delegate(TickCtx t) nothrow notify;
 
     private this(
-        void function(Strain d) run,
+        void function(Branch d) run,
         // error handler
-        void function(Strain d, Throwable thr) nothrow error,
+        void function(Branch d, Throwable thr) nothrow error,
         // ticks context
         TickCtx ctx
     ) {
@@ -85,9 +75,9 @@ public struct Tick {
         this.run = run;
         this.error = error;
 
-        // if strain is not part of a branch yet, create one for it
-        if(ctx.strain.branch == UUID.init)
-            ctx.strain.branch = randomUUID;
+        // if branch is not set yet, create one for it
+        if(ctx.branch.id == UUID.init)
+            ctx.branch.id = randomUUID;
         this.ctx = ctx;
     }
 }

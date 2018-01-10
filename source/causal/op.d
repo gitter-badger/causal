@@ -1,9 +1,9 @@
 module causal.op;
 private import causal.aspect;
+private import causal.tick;
 private import causal.meta;
 private import causal.pack;
 private import causal.proc;
-private import causal.tick;
 
 final class Operator {
     private import core.sync.rwmutex: ReadWriteMutex;
@@ -18,7 +18,6 @@ final class Operator {
 
     @packing void onPacking() {
         synchronized(this.__lock.writer) {
-            this.join();
             if(this.__proc !is null)
                 this.__proc.stop();
         }
@@ -28,6 +27,17 @@ final class Operator {
         synchronized(this.__lock.writer) {
             if(this.__proc is null)
                 this.__proc = new Processor(this.pipes);
+        }
+    }
+
+    void assign(TickCtx c) {
+        synchronized(this.__lock.reader) {
+            auto tick = Ticks.get(c);
+            if(c.branch.data.loaded) {
+                c.branch.data.checkout();
+                tick.notify = &c.branch.data.notify;
+                this.__proc.invoke(tick);
+            }
         }
     }
 }

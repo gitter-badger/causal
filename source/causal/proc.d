@@ -255,9 +255,9 @@ package final class Processor {
         }
 
         try {
-            tick.run(tick.ctx.strain);
+            tick.run(tick.ctx.branch);
         } catch (Throwable thr) {
-            tick.error(tick.ctx.strain, thr);
+            tick.error(tick.ctx.branch, thr);
         }
 
         tick.notify(tick.ctx);

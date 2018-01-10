@@ -57,6 +57,7 @@ package final pure class Data {
                 if(this.__loaded[this.__id]) {
                     this.__loaded[this.__id] = false;
                     this.join();
+                    
                     // TODO pack aspects
                 }
             }
@@ -82,30 +83,19 @@ package final pure class Data {
                 // TODO unpack aspects
 
                 // if it has exactly one operator aspect it is self driven
-                // self dirven data/tick sets are the kickstarters of the system
+                // self sustained data/tick/opaspect sets are the kickstarters
                 if(fqn!Operator in this.__aspects[this.__id] &&
                     this.__aspects[this.__id][fqn!Operator].length == 1
                 ) { // then it can make itself ticking
                     auto op = this.__aspects[this.__id][fqn!Operator][0];
                     foreach(t; this.ticks)
-                        op.as!Operator.assign(t, &this.notify);
+                        op.as!Operator.assign(t);
                 }
             }
         }
     }
 
-    void assign(TickCtx c, Processor p) {
-        synchronized(this.__lock.reader) {
-            if(this.loaded) {
-                auto tick = Ticks.get(c);
-                this.checkout();
-                tick.notify = &this.notify;
-                p.invoke(tick);
-            } else ticks ~= c;
-        }
-    }
-
-    private nothrow void notify(TickCtx tc) {
+    package nothrow void notify(TickCtx tc) {
         this.checkin();
     }
 }
